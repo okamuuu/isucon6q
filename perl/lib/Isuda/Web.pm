@@ -4,7 +4,7 @@ use warnings;
 use utf8;
 use Kossy;
 use DBIx::Sunny;
-use Encode qw/encode_utf8/;
+use Encode qw/decode_utf8 encode_utf8/;
 use POSIX qw/ceil/;
 use Furl;
 use JSON::XS qw/decode_json/;
@@ -15,10 +15,21 @@ use Text::Xslate::Util qw/html_escape/;
 use List::Util qw/min max/;
 use MyProfiler;
 use Regexp::Trie;
+use Redis::Fast;
 
 my $p = MyProfiler->new();
 sub start { $p->start($_[0]) }
 sub end   { $p->end($_[0]) }
+
+my $redis = Redis::Fast->new;
+sub redis {
+    return $redis;
+}
+
+my $json = JSON::XS->new->utf8;
+sub json {
+    return $json;
+}
 
 sub config {
     state $conf = {
@@ -84,6 +95,15 @@ get '/initialize' => sub {
     $self->dbh->query(q[
         TRUNCATE entry_star;
     ]);
+
+    # 正規表現をあらかじめセットしておく
+    my $keywords = $self->dbh->select_all(qq[
+        SELECT keyword FROM entry
+    ]);
+    my $tr = Regexp::Trie->new;
+    $tr->add($_) for map { $_->{keyword} } @$keywords;
+    my $re = $tr->regexp; 
+    set_regexp($re);
  
     $c->render_json({
         result => 'ok',
@@ -133,6 +153,9 @@ post '/keyword' => [qw/set_name authenticate/] => sub {
     if (is_spam_contents($description) || is_spam_contents($keyword)) {
         $c->halt(400, 'SPAM!');
     }
+
+    del_regex();
+
     $self->dbh->query(q[
         INSERT INTO entry (author_id, keyword, description, created_at, updated_at)
         VALUES (?, ?, ?, NOW(), NOW())
@@ -229,6 +252,8 @@ post '/keyword/:keyword' => [qw/set_name authenticate/] => sub {
         WHERE keyword = ?
     ], $keyword);
 
+    del_redis();
+
     $self->dbh->query(qq[
         DELETE FROM entry
         WHERE keyword = ?
@@ -239,18 +264,23 @@ post '/keyword/:keyword' => [qw/set_name authenticate/] => sub {
 sub htmlify {
     my ($self, $c, $content) = @_;
     return '' unless defined $content;
+    
     start('sub htmlify -> select keywords');
     my $keywords = $self->dbh->select_all(qq[
-        SELECT keyword FROM entry;
+        SELECT keyword FROM entry
     ]);
     end('sub htmlify -> select keywords');
 
-    start('sub htmlify -> create regex');
-    my $tr = Regexp::Trie->new;
-    $tr->add($_) for map { $_->{keyword} } @$keywords;
-    my $re = $tr->regexp; 
-    # my $re = join '|', map { quotemeta $_->{keyword} } @$keywords;
-    end('sub htmlify -> create regex');
+    my $re = get_regex();
+    if (not $re) {
+      start('sub htmlify -> create regex');
+      my $tr = Regexp::Trie->new;
+      $tr->add($_) for map { $_->{keyword} } @$keywords;
+      $re = $tr->regexp; 
+      # my $re = join '|', map { quotemeta $_->{keyword} } @$keywords;
+      set_regexp($re);
+      end('sub htmlify -> create regex');
+    }
     
     my %kw2sha;
     
@@ -348,5 +378,17 @@ post '/stars' => sub {
         result => 'ok',
     }); 
 };
+
+sub set_regexp {
+  redis()->set('regexp', encode_utf8($_[0]));
+}
+
+sub get_regex {
+  return decode_utf8(redis()->get('regexp'));
+}
+
+sub del_regex {
+  return redis()->del('regexp');
+}
 
 1;

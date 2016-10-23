@@ -387,6 +387,13 @@ DISTRIBUTIONS
       perl 5.008
       strict 0
       warnings 0
+  File-Which-1.21
+    pathname: P/PL/PLICEASE/File-Which-1.21.tar.gz
+    provides:
+      File::Which 1.21
+    requirements:
+      ExtUtils::MakeMaker 0
+      perl 5.006
   Filesys-Notify-Simple-0.12
     pathname: M/MI/MIYAGAWA/Filesys-Notify-Simple-0.12.tar.gz
     provides:
@@ -1019,6 +1026,17 @@ DISTRIBUTIONS
       Proc::Wait3 0.05
     requirements:
       ExtUtils::MakeMaker 0
+  Redis-Fast-0.18
+    pathname: S/SH/SHOGO/Redis-Fast-0.18.tar.gz
+    provides:
+      Redis::Fast 0.18
+      Redis::Fast::Hash undef
+      Redis::Fast::List undef
+      Redis::Fast::Sentinel undef
+    requirements:
+      ExtUtils::CBuilder 0
+      Module::Build 0.4005
+      Module::Build::XSUtil 0.16
   Regexp-Trie-0.02
     pathname: D/DA/DANKOGAI/Regexp-Trie-0.02.tar.gz
     provides:
