@@ -13,6 +13,11 @@ use Digest::SHA1 qw/sha1_hex/;
 use URI::Escape qw/uri_escape_utf8/;
 use Text::Xslate::Util qw/html_escape/;
 use List::Util qw/min max/;
+use MyProfiler;
+
+my $p = MyProfiler->new();
+sub start { $p->start($_[0]) }
+sub end   { $p->end($_[0]) }
 
 sub config {
     state $conf = {
@@ -233,22 +238,41 @@ post '/keyword/:keyword' => [qw/set_name authenticate/] => sub {
 sub htmlify {
     my ($self, $c, $content) = @_;
     return '' unless defined $content;
+    start('sub htmlify -> select keywords');
     my $keywords = $self->dbh->select_all(qq[
         SELECT * FROM entry ORDER BY CHARACTER_LENGTH(keyword) DESC
     ]);
-    my %kw2sha;
+    end('sub htmlify -> select keywords');
+
+    start('sub htmlify -> create regex');
     my $re = join '|', map { quotemeta $_->{keyword} } @$keywords;
+    end('sub htmlify -> create regex');
+    
+    my %kw2sha;
+    
+    start('sub htmlify -> replace content');
     $content =~ s{($re)}{
         my $kw = $1;
         $kw2sha{$kw} = "isuda_" . sha1_hex(encode_utf8($kw));
     }eg;
+    end('sub htmlify -> replace content');
+    
+    start('sub htmlify -> html_escape');
     $content = html_escape($content);
+    end('sub htmlify -> html_escape');
+
+    start('sub htmlify -> link escape');
     while (my ($kw, $hash) = each %kw2sha) {
         my $url = $c->req->uri_for('/keyword/' . uri_escape_utf8($kw));
         my $link = sprintf '<a href="%s">%s</a>', $url, html_escape($kw);
         $content =~ s/$hash/$link/g;
     }
+    end('sub htmlify -> link escape');
+
+    start('sub htmlify -> replace br');
     $content =~ s{\n}{<br \/>\n}gr;
+    end('sub htmlify -> replace br');
+    return $content;
 }
 
 sub load_stars {
