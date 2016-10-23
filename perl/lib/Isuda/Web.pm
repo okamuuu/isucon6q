@@ -75,9 +75,10 @@ get '/initialize' => sub {
     $self->dbh->query(q[
         DELETE FROM entry WHERE id > 7101
     ]);
-    my $origin = config('isutar_origin');
-    my $url = URI->new("$origin/initialize");
-    Furl->new->get($url);
+    $self->dbh->query(q[
+        TRUNCATE entry_star;
+    ]);
+ 
     $c->render_json({
         result => 'ok',
     });
@@ -97,7 +98,7 @@ get '/' => [qw/set_name/] => sub {
     ]);
     foreach my $entry (@$entries) {
         $entry->{html}  = $self->htmlify($c, $entry->{description});
-        $entry->{stars} = $self->load_stars($entry->{keyword});
+        $entry->{stars} = $self->get_entry_stars($entry->{id});
     }
 
     my $total_entries = $self->dbh->select_one(q[
@@ -207,7 +208,7 @@ get '/keyword/:keyword' => [qw/set_name/] => sub {
     ], $keyword);
     $c->halt(404) unless $entry;
     $entry->{html} = $self->htmlify($c, $entry->{description});
-    $entry->{stars} = $self->load_stars($entry->{keyword});
+    $entry->{stars} = $self->get_entry_stars($entry->{id});
 
     $c->render('keyword.tx', { entry => $entry });
 };
@@ -271,5 +272,53 @@ sub is_spam_contents {
     my $data = decode_json $res->content;
     !$data->{valid};
 }
+
+sub get_entry_stars {
+    my ($self, $entry_id) = @_;
+    return $self->dbh->select_all(q[
+        SELECT * FROM entry_star WHERE entry_id = ?
+    ], $entry_id);
+}
+
+get '/stars' => sub {
+    my ($self, $c) = @_; 
+
+    my $entry = $self->dbh->select_row(qq[
+        SELECT * FROM entry
+        WHERE keyword = ?
+    ], $c->req->parameters->{keyword});
+
+    if (not $entry) {
+      return $c->render_json({ stars => [] }); 
+    }
+    
+    my $stars = $self->get_entry_stars($entry->{id});
+    $c->render_json({
+        stars => $stars,
+    }); 
+};
+
+post '/stars' => sub {
+    my ($self, $c) = @_; 
+    my $keyword = $c->req->parameters->{keyword};
+
+    my $entry = $self->dbh->select_row(qq[
+        SELECT * FROM entry
+        WHERE keyword = ?
+    ], $c->req->parameters->{keyword});
+
+    if (not $entry) {
+        $c->halt(404);
+    }   
+
+    $self->dbh->query(q[
+        INSERT INTO entry_star (entry_id, user_name)
+        VALUES (?, ?)
+    ], $entry->{id}, $c->req->parameters->{user});
+
+    $c->render_json({
+        result => 'ok',
+    }); 
+};
 
 1;
