@@ -14,6 +14,7 @@ use URI::Escape qw/uri_escape_utf8/;
 use Text::Xslate::Util qw/html_escape/;
 use List::Util qw/min max/;
 use MyProfiler;
+use Regexp::Trie;
 
 my $p = MyProfiler->new();
 sub start { $p->start($_[0]) }
@@ -245,7 +246,10 @@ sub htmlify {
     end('sub htmlify -> select keywords');
 
     start('sub htmlify -> create regex');
-    my $re = join '|', map { quotemeta $_->{keyword} } @$keywords;
+    my $tr = Regexp::Trie->new;
+    $tr->add($_) for map { $_->{keyword} } @$keywords;
+    my $re = $tr->regexp; 
+    # my $re = join '|', map { quotemeta $_->{keyword} } @$keywords;
     end('sub htmlify -> create regex');
     
     my %kw2sha;

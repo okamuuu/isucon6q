@@ -311,13 +311,13 @@ DISTRIBUTIONS
       ExtUtils::MakeMaker 6.30
       strict 0
       warnings 0
-  ExtUtils-Helpers-0.025
-    pathname: L/LE/LEONT/ExtUtils-Helpers-0.025.tar.gz
+  ExtUtils-Helpers-0.026
+    pathname: L/LE/LEONT/ExtUtils-Helpers-0.026.tar.gz
     provides:
-      ExtUtils::Helpers 0.025
-      ExtUtils::Helpers::Unix 0.025
-      ExtUtils::Helpers::VMS 0.025
-      ExtUtils::Helpers::Windows 0.025
+      ExtUtils::Helpers 0.026
+      ExtUtils::Helpers::Unix 0.026
+      ExtUtils::Helpers::VMS 0.026
+      ExtUtils::Helpers::Windows 0.026
     requirements:
       Carp 0
       Exporter 5.57
@@ -1019,6 +1019,12 @@ DISTRIBUTIONS
       Proc::Wait3 0.05
     requirements:
       ExtUtils::MakeMaker 0
+  Regexp-Trie-0.02
+    pathname: D/DA/DANKOGAI/Regexp-Trie-0.02.tar.gz
+    provides:
+      Regexp::Trie 0.02
+    requirements:
+      ExtUtils::MakeMaker 0
   Router-Boom-1.03
     pathname: T/TO/TOKUHIROM/Router-Boom-1.03.tar.gz
     provides:
@@ -1096,10 +1102,10 @@ DISTRIBUTIONS
       strict 0
       vars 0
       warnings 0
-  Test-Deep-1.120
-    pathname: R/RJ/RJBS/Test-Deep-1.120.tar.gz
+  Test-Deep-1.123
+    pathname: R/RJ/RJBS/Test-Deep-1.123.tar.gz
     provides:
-      Test::Deep 1.120
+      Test::Deep 1.123
       Test::Deep::All undef
       Test::Deep::Any undef
       Test::Deep::Array undef
