@@ -97,14 +97,18 @@ get '/initialize' => sub {
     ]);
 
     # 正規表現をあらかじめセットしておく
-    my $keywords = $self->dbh->select_all(qq[
+    my $entries = $self->dbh->select_all(qq[
         SELECT keyword FROM entry
     ]);
-    my $tr = Regexp::Trie->new;
-    $tr->add($_) for map { $_->{keyword} } @$keywords;
-    my $re = $tr->regexp; 
-    set_regexp($re);
- 
+    my $keywords = [map { $_->{keyword} } @$entries];
+
+    my ($number_keywords, $others_keywords) = filter_words($keywords);
+
+    my $number_regexp = create_regexp($number_keywords);
+    my $others_regexp = create_regexp($others_keywords);
+    set_regexp('number', $number_regexp);
+    set_regexp('others', $others_regexp);
+    
     $c->render_json({
         result => 'ok',
     });
@@ -154,7 +158,11 @@ post '/keyword' => [qw/set_name authenticate/] => sub {
         $c->halt(400, 'SPAM!');
     }
 
-    del_regex();
+    if (is_number_words($keyword)) {
+        del_regexp('number');
+    } else {
+        del_regexp('others');
+    }
 
     $self->dbh->query(q[
         INSERT INTO entry (author_id, keyword, description, created_at, updated_at)
@@ -252,7 +260,11 @@ post '/keyword/:keyword' => [qw/set_name authenticate/] => sub {
         WHERE keyword = ?
     ], $keyword);
 
-    del_redis();
+    if (is_number_words($keyword)) {
+        del_regexp('number');
+    } else {
+        del_regexp('others');
+    }
 
     $self->dbh->query(qq[
         DELETE FROM entry
@@ -266,26 +278,35 @@ sub htmlify {
     return '' unless defined $content;
     
     start('sub htmlify -> select keywords');
-    my $keywords = $self->dbh->select_all(qq[
+    my $entries = $self->dbh->select_all(qq[
         SELECT keyword FROM entry
     ]);
     end('sub htmlify -> select keywords');
+    my $keywords = [map { $_->{keyword} } @$entries];
 
-    my $re = get_regex();
-    if (not $re) {
-      start('sub htmlify -> create regex');
-      my $tr = Regexp::Trie->new;
-      $tr->add($_) for map { $_->{keyword} } @$keywords;
-      $re = $tr->regexp; 
-      # my $re = join '|', map { quotemeta $_->{keyword} } @$keywords;
-      set_regexp($re);
-      end('sub htmlify -> create regex');
+    my ($number_keywords, $others_keywords) = filter_words($keywords);
+
+    my $number_regexp = get_regexp('number');
+    my $others_regexp = get_regexp('others');
+
+    if (not $number_regexp) {
+        start('sub htmlify -> create number regex');
+        $number_regexp = create_regexp($number_keywords);
+        set_regexp('number', $number_regexp);
+        end('sub htmlify -> create number regex');
     }
-    
+
+    if (not $others_regexp) {
+        start('sub htmlify -> create regex');
+        $others_regexp = create_regexp($others_keywords);
+        set_regexp('others', $others_regexp);
+        end('sub htmlify -> create regex');
+    }
+ 
     my %kw2sha;
     
     start('sub htmlify -> replace content');
-    $content =~ s{($re)}{
+    $content =~ s{($number_regexp|$others_regexp)}{
         my $kw = $1;
         $kw2sha{$kw} = "isuda_" . sha1_hex(encode_utf8($kw));
     }eg;
@@ -380,15 +401,47 @@ post '/stars' => sub {
 };
 
 sub set_regexp {
-  redis()->set('regexp', encode_utf8($_[0]));
+  my ($key, $regex) = @_;
+  my $v = encode_utf8($regex);
+  redis()->set('regexp:' . $key, $v);
 }
 
-sub get_regex {
-  return decode_utf8(redis()->get('regexp'));
+sub get_regexp {
+  my ($key) = @_;
+  return decode_utf8(redis()->get('regexp:' . $key));
 }
 
-sub del_regex {
-  return redis()->del('regexp');
+sub del_regexp {
+  my ($key) = @_;
+  return redis()->del('regexp:'. $key);
+}
+
+sub is_number_words {
+  return $_[0] =~ /\d/ ? 1 : 0;
+}
+
+sub filter_words {
+  my ($words) = @_; 
+
+  my @number_words = (); 
+  my @any_words = (); 
+  for my $k (@{$words}) {
+    if (is_number_words($k)) {
+      push(@number_words, $k);
+    }   
+    else {
+      push(@any_words, $k);
+    }   
+  }
+
+  return (\@number_words, \@any_words);
+}
+
+sub create_regexp {
+    my ($keywords) = @_;
+    my $tr = Regexp::Trie->new;
+    $tr->add($_) for @$keywords;
+    return $tr->regexp; 
 }
 
 1;
