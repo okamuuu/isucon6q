@@ -23,6 +23,9 @@ use Kossy::Request;
 use Kossy::Response;
 use HTTP::Headers::Fast;
 
+use MyProfiler;
+my $p = MyProfiler->new();
+
 our $VERSION = '0.40';
 our @EXPORT = qw/new root_dir psgi build_app _router _connect get post router filter _wrap_filter/;
 
@@ -70,9 +73,16 @@ sub psgi {
 
 sub build_app {
     my $self = shift;
+    my $name = ref $self;
 
     #router
     my $router = Router::Boom->new;
+    for my $key (keys %{$self->_router}) {
+        my $router = $self->_router->{$key};
+        for my $k (keys %{$router}) {
+            $router->{$k}->{__route__} = $name . " => " . $router->{$k}->{__route__};
+        }
+    }
     $router->add($_ => $self->_router->{$_} ) for keys %{$self->_router};
     my $xslate_cache_local = $XSLATE_CACHE;
     my $xslate_cache_dir_local = $XSLATE_CACHE_DIR;
@@ -101,6 +111,7 @@ sub build_app {
     sub {
         my $env = shift;
         $Kossy::Response::SECURITY_HEADER = $security_header_local;
+        my $route;
         try {
             my $header = bless {
                 'content-type' => 'text/html; charset=UTF-8',
@@ -136,7 +147,7 @@ sub build_app {
                 }
                 $c->halt(400,'unexpected character in request');
             };
-            
+            $route = $match->{__route__};
             my $code = $match->{__action__};
             my $filters = $match->{__filter__} || [];
             if ( $] == 5.020000 || $] == 5.020100 ) {
@@ -176,7 +187,14 @@ sub build_app {
             }
             # do all
             local $Kossy::Response::DIRECT;
-            $app->($self, $c)->finalize;
+            $p->start($route);
+            try {
+                $app->($self, $c)->finalize;
+            } catch {
+                die $_;
+            } finally {
+                $p->end($route);
+            };
         } catch {
             if ( ref $_ && ref $_ eq 'Kossy::Exception' ) {
                 return $_->response;
@@ -206,8 +224,10 @@ sub _connect {
         $code = $filter;
         $filter = [];
     }
+
     for my $method ( @$methods ) {
         $class->_router->{$pattern}->{$method} = {
+            __route__ => $method . " " . $pattern,
             __action__ => $code,
             __filter__ => $filter
         };
