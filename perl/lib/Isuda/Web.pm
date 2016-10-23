@@ -241,7 +241,7 @@ sub htmlify {
     return '' unless defined $content;
     start('sub htmlify -> select keywords');
     my $keywords = $self->dbh->select_all(qq[
-        SELECT keyword FROM entry ORDER BY CHARACTER_LENGTH(keyword) DESC
+        SELECT keyword FROM entry;
     ]);
     end('sub htmlify -> select keywords');
 
