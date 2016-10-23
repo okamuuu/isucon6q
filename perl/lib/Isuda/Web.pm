@@ -66,12 +66,14 @@ filter 'set_name' => sub {
     sub {
         my ($self, $c) = @_;
         my $user_id = $c->env->{'psgix.session'}->{user_id};
+        my $user_name = $c->env->{'psgix.session'}->{user_name};
         if ($user_id) {
             $c->stash->{user_id} = $user_id;
-            $c->stash->{user_name} = $self->dbh->select_one(q[
-                SELECT name FROM user
-                WHERE id = ?
-            ], $user_id);
+            $c->stash->{user_name} = $user_name;
+            # $c->stash->{user_name} = $self->dbh->select_one(q[
+            #     SELECT name FROM user
+            #     WHERE id = ?
+            # ], $user_id);
             $c->halt(403) unless defined $c->stash->{user_name};
         }
         $app->($self,$c);
@@ -185,6 +187,7 @@ post '/register' => sub {
     my $user_id = register($self->dbh, $name, $pw);
 
     $c->env->{'psgix.session'}->{user_id} = $user_id;
+    $c->env->{'psgix.session'}->{user_name} = $name;
     $c->redirect('/');
 };
 
@@ -220,6 +223,7 @@ post '/login' => sub {
     }
 
     $c->env->{'psgix.session'}->{user_id} = $row->{id};
+    $c->env->{'psgix.session'}->{user_name} = $row->{name};
     $c->redirect('/');
 };
 
