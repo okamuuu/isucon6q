@@ -102,13 +102,6 @@ get '/initialize' => sub {
     ]);
     my $keywords = [map { $_->{keyword} } @$entries];
 
-    my ($number_keywords, $others_keywords) = filter_words($keywords);
-
-    my $number_regexp = create_regexp($number_keywords);
-    my $others_regexp = create_regexp($others_keywords);
-    set_regexp('number', $number_regexp);
-    set_regexp('others', $others_regexp);
-    
     $c->render_json({
         result => 'ok',
     });
@@ -156,12 +149,6 @@ post '/keyword' => [qw/set_name authenticate/] => sub {
 
     if (is_spam_contents($description) || is_spam_contents($keyword)) {
         $c->halt(400, 'SPAM!');
-    }
-
-    if (is_number_words($keyword)) {
-        del_regexp('number');
-    } else {
-        del_regexp('others');
     }
 
     $self->dbh->query(q[
@@ -260,12 +247,6 @@ post '/keyword/:keyword' => [qw/set_name authenticate/] => sub {
         WHERE keyword = ?
     ], $keyword);
 
-    if (is_number_words($keyword)) {
-        del_regexp('number');
-    } else {
-        del_regexp('others');
-    }
-
     $self->dbh->query(qq[
         DELETE FROM entry
         WHERE keyword = ?
@@ -282,31 +263,22 @@ sub htmlify {
         SELECT keyword FROM entry
     ]);
     end('sub htmlify -> select keywords');
-    my $keywords = [map { $_->{keyword} } @$entries];
 
-    my ($number_keywords, $others_keywords) = filter_words($keywords);
-
-    my $number_regexp = get_regexp('number');
-    my $others_regexp = get_regexp('others');
-
-    if (not $number_regexp) {
-        start('sub htmlify -> create number regex');
-        $number_regexp = create_regexp($number_keywords);
-        set_regexp('number', $number_regexp);
-        end('sub htmlify -> create number regex');
+    start('sub htmlify -> create regex');
+    my $rt = Regexp::Trie->new;
+    for my $entry (@$entries) {
+      my $re = quotemeta $entry->{keyword};
+      if ($content =~ /$re/) {
+        $rt->add($entry->{keyword});
+      }
     }
-
-    if (not $others_regexp) {
-        start('sub htmlify -> create regex');
-        $others_regexp = create_regexp($others_keywords);
-        set_regexp('others', $others_regexp);
-        end('sub htmlify -> create regex');
-    }
+    my $re = $rt->regexp;
+    end('sub htmlify -> create regex');
  
     my %kw2sha;
     
     start('sub htmlify -> replace content');
-    $content =~ s{($number_regexp|$others_regexp)}{
+    $content =~ s{($re)}{
         my $kw = $1;
         $kw2sha{$kw} = "isuda_" . sha1_hex(encode_utf8($kw));
     }eg;
