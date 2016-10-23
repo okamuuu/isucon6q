@@ -120,7 +120,12 @@ get '/' => [qw/set_name/] => sub {
         OFFSET @{[ $PER_PAGE * ($page-1) ]}
     ]);
     foreach my $entry (@$entries) {
-        $entry->{html}  = $self->htmlify($c, $entry->{description});
+        if ($entry->{rendered}) {
+          $entry->{html}  = $entry->{rendered};
+        } else {
+          $entry->{html}  = $self->htmlify($c, $entry->{description});
+          $self->update_rendered($entry);
+        }
         $entry->{stars} = $self->get_entry_stars($entry->{id});
     }
 
@@ -151,6 +156,8 @@ post '/keyword' => [qw/set_name authenticate/] => sub {
         $c->halt(400, 'SPAM!');
     }
 
+    $self->del_html_by_keyword($keyword);
+    
     $self->dbh->query(q[
         INSERT INTO entry (author_id, keyword, description, created_at, updated_at)
         VALUES (?, ?, ?, NOW(), NOW())
@@ -231,7 +238,12 @@ get '/keyword/:keyword' => [qw/set_name/] => sub {
         WHERE keyword = ?
     ], $keyword);
     $c->halt(404) unless $entry;
-    $entry->{html} = $self->htmlify($c, $entry->{description});
+    if ($entry->{rendered}) {
+      $entry->{html}  = $entry->{rendered};
+    } else {
+      $entry->{html}  = $self->htmlify($c, $entry->{description});
+      $self->update_rendered($entry);
+    }
     $entry->{stars} = $self->get_entry_stars($entry->{id});
 
     $c->render('keyword.tx', { entry => $entry });
@@ -246,6 +258,8 @@ post '/keyword/:keyword' => [qw/set_name authenticate/] => sub {
         SELECT * FROM entry
         WHERE keyword = ?
     ], $keyword);
+    
+    $self->del_html_by_keyword($keyword);
 
     $self->dbh->query(qq[
         DELETE FROM entry
@@ -257,14 +271,15 @@ post '/keyword/:keyword' => [qw/set_name authenticate/] => sub {
 sub htmlify {
     my ($self, $c, $content) = @_;
     return '' unless defined $content;
-    
-    start('sub htmlify -> select keywords');
+   
+    start('sub htmlify'); 
+    # start('sub htmlify -> select keywords');
     my $entries = $self->dbh->select_all(qq[
         SELECT keyword FROM entry
     ]);
-    end('sub htmlify -> select keywords');
+    # end('sub htmlify -> select keywords');
 
-    start('sub htmlify -> create regex');
+    # start('sub htmlify -> create regex');
     my $rt = Regexp::Trie->new;
     for my $entry (@$entries) {
       my $re = quotemeta $entry->{keyword};
@@ -273,32 +288,33 @@ sub htmlify {
       }
     }
     my $re = $rt->regexp;
-    end('sub htmlify -> create regex');
+    # end('sub htmlify -> create regex');
  
     my %kw2sha;
     
-    start('sub htmlify -> replace content');
+    # start('sub htmlify -> replace content');
     $content =~ s{($re)}{
         my $kw = $1;
         $kw2sha{$kw} = "isuda_" . sha1_hex(encode_utf8($kw));
     }eg;
-    end('sub htmlify -> replace content');
+    # end('sub htmlify -> replace content');
     
-    start('sub htmlify -> html_escape');
+    # start('sub htmlify -> html_escape');
     $content = html_escape($content);
-    end('sub htmlify -> html_escape');
+    # end('sub htmlify -> html_escape');
 
-    start('sub htmlify -> link escape');
+    # start('sub htmlify -> link escape');
     while (my ($kw, $hash) = each %kw2sha) {
         my $url = $c->req->uri_for('/keyword/' . uri_escape_utf8($kw));
         my $link = sprintf '<a href="%s">%s</a>', $url, html_escape($kw);
         $content =~ s/$hash/$link/g;
     }
-    end('sub htmlify -> link escape');
+    # end('sub htmlify -> link escape');
 
-    start('sub htmlify -> replace br');
+    # start('sub htmlify -> replace br');
     $content =~ s{\n}{<br \/>\n}gr;
-    end('sub htmlify -> replace br');
+    # end('sub htmlify -> replace br');
+    end('sub htmlify'); 
     return $content;
 }
 
@@ -416,4 +432,40 @@ sub create_regexp {
     return $tr->regexp; 
 }
 
+get '/hack/html' => sub {
+    my ($self, $c)  = @_;
+
+    my $entries = $self->dbh->select_all(qq[
+        SELECT id, keyword, description FROM entry WHERE id <= 7101
+    ]);
+
+    for my $entry (@$entries) {
+      warn $entry->{id};
+      my $html = $self->htmlify($c, $entry->{description});
+      $self->dbh->query(qq[
+        UPDATE entry SET rendered = ? WHERE id = ?
+      ], ($html, $entry->{id}));
+    }
+
+    $c->render_json({
+        "result" => "ok"
+    }); 
+};
+
+sub update_rendered {
+    my ($self, $entry) = @_;
+    $self->dbh->query(qq[
+      UPDATE entry SET rendered = ? WHERE id = ?
+    ], ($entry->{html}, $entry->{id}));
+} 
+
+sub del_html_by_keyword {
+    my ($self, $keyword) = @_;
+    return if not $keyword;
+    $self->dbh->query(q[ 
+        UPDATE entry SET rendered = NULL WHERE description LIKE ?
+    ], ("%" . $keyword . "%"));
+}
+
 1;
+;
