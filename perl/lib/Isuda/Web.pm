@@ -66,14 +66,12 @@ filter 'set_name' => sub {
     sub {
         my ($self, $c) = @_;
         my $user_id = $c->env->{'psgix.session'}->{user_id};
-        my $user_name = $c->env->{'psgix.session'}->{user_name};
         if ($user_id) {
             $c->stash->{user_id} = $user_id;
-            $c->stash->{user_name} = $user_name;
-            # $c->stash->{user_name} = $self->dbh->select_one(q[
-            #     SELECT name FROM user
-            #     WHERE id = ?
-            # ], $user_id);
+            $c->stash->{user_name} = $self->dbh->select_one(q[
+                SELECT name FROM user
+                WHERE id = ?
+            ], $user_id);
             $c->halt(403) unless defined $c->stash->{user_name};
         }
         $app->($self,$c);
@@ -98,11 +96,18 @@ get '/initialize' => sub {
         TRUNCATE entry_star;
     ]);
 
-    # 正規表現をあらかじめセットしておく
     my $entries = $self->dbh->select_all(qq[
         SELECT keyword FROM entry
     ]);
-    my $keywords = [map { $_->{keyword} } @$entries];
+    my $posts = $self->dbh->select_all(qq[ 
+        SELECT keyword FROM post
+    ]);
+
+    my @keywords = ((map { $_->{keyword} } @$entries), (map { $_->{keyword} } @$posts));
+    my $rt = Regexp::Trie->new;
+    $rt->add($_) for @keywords;
+    my $re = $rt->regexp;
+    set_regexp($re);
 
     $c->render_json({
         result => 'ok',
@@ -159,7 +164,7 @@ post '/keyword' => [qw/set_name authenticate/] => sub {
     }
 
     $self->del_html_by_keyword($keyword);
-    
+    $self->save_posted_keyword($keyword);    
     $self->dbh->query(q[
         INSERT INTO entry (author_id, keyword, description, created_at, updated_at)
         VALUES (?, ?, ?, NOW(), NOW())
@@ -187,7 +192,6 @@ post '/register' => sub {
     my $user_id = register($self->dbh, $name, $pw);
 
     $c->env->{'psgix.session'}->{user_id} = $user_id;
-    $c->env->{'psgix.session'}->{user_name} = $name;
     $c->redirect('/');
 };
 
@@ -223,7 +227,6 @@ post '/login' => sub {
     }
 
     $c->env->{'psgix.session'}->{user_id} = $row->{id};
-    $c->env->{'psgix.session'}->{user_name} = $row->{name};
     $c->redirect('/');
 };
 
@@ -278,25 +281,26 @@ sub htmlify {
    
     start('sub htmlify'); 
     # start('sub htmlify -> select keywords');
-    my $entries = $self->dbh->select_all(qq[
-        SELECT keyword FROM entry
-    ]);
+    # my $entries = $self->dbh->select_all(qq[
+    #     SELECT keyword FROM entry
+    # ]);
     # end('sub htmlify -> select keywords');
 
     # start('sub htmlify -> create regex');
-    my $rt = Regexp::Trie->new;
-    for my $entry (@$entries) {
-      my $re = quotemeta $entry->{keyword};
-      if ($content =~ /$re/) {
-        $rt->add($entry->{keyword});
-      }
-    }
-    my $re = $rt->regexp;
+    # my $rt = Regexp::Trie->new;
+    # for my $entry (@$entries) {
+    #   my $re = quotemeta $entry->{keyword};
+    #   if ($content =~ /$re/) {
+    #     $rt->add($entry->{keyword});
+    #   }
+    # }
+    # my $re = $rt->regexp;
     # end('sub htmlify -> create regex');
  
     my %kw2sha;
     
     # start('sub htmlify -> replace content');
+    my $re = get_regexp();
     $content =~ s{($re)}{
         my $kw = $1;
         $kw2sha{$kw} = "isuda_" . sha1_hex(encode_utf8($kw));
@@ -393,19 +397,13 @@ post '/stars' => sub {
 };
 
 sub set_regexp {
-  my ($key, $regex) = @_;
+  my ($regex) = @_;
   my $v = encode_utf8($regex);
-  redis()->set('regexp:' . $key, $v);
+  redis()->set('regexp', $v);
 }
 
 sub get_regexp {
-  my ($key) = @_;
-  return decode_utf8(redis()->get('regexp:' . $key));
-}
-
-sub del_regexp {
-  my ($key) = @_;
-  return redis()->del('regexp:'. $key);
+  return decode_utf8(redis()->get('regexp'));
 }
 
 sub is_number_words {
@@ -469,6 +467,17 @@ sub del_html_by_keyword {
     $self->dbh->query(q[ 
         UPDATE entry SET rendered = NULL WHERE description LIKE ?
     ], ("%" . $keyword . "%"));
+}
+
+sub save_posted_keyword {
+    my ($self, $keyword) = @_;
+    
+    $self->dbh->query(q[
+        INSERT INTO post (keyword, created_at, updated_at)
+        VALUES (?, NOW(), NOW())
+        ON DUPLICATE KEY UPDATE
+        keyword = ?, updated_at = NOW()
+    ], ($keyword) x 2);
 }
 
 1;
